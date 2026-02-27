@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -14,10 +13,10 @@ from aumai_modelseal.models import (
     SignedManifest,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _load_signed_manifest(path: str) -> SignedManifest:
     raw = Path(path).read_text(encoding="utf-8")
@@ -27,6 +26,7 @@ def _load_signed_manifest(path: str) -> SignedManifest:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 @click.group()
 @click.version_option()
@@ -61,10 +61,29 @@ def keygen_command(output: str, algorithm: str) -> None:
 
 
 @main.command("sign")
-@click.option("--model-dir", required=True, metavar="DIR", help="Directory containing model files.")
-@click.option("--key", required=True, metavar="PATH", help="Path to private PEM key file.")
-@click.option("--signer-id", required=True, metavar="ID", help="Signer identity string (e.g. email).")
-@click.option("--model-name", default=None, help="Override model name (defaults to directory name).")
+@click.option(
+    "--model-dir",
+    required=True,
+    metavar="DIR",
+    help="Directory containing model files.",
+)
+@click.option(
+    "--key",
+    required=True,
+    metavar="PATH",
+    help="Path to private PEM key file.",
+)
+@click.option(
+    "--signer-id",
+    required=True,
+    metavar="ID",
+    help="Signer identity string (e.g. email).",
+)
+@click.option(
+    "--model-name",
+    default=None,
+    help="Override model name (defaults to directory name).",
+)
 @click.option("--model-version", default="0.0.0", show_default=True)
 @click.option("--framework", default="unknown", show_default=True)
 @click.option("--author", default="", help="Author name.")
@@ -72,7 +91,10 @@ def keygen_command(output: str, algorithm: str) -> None:
     "--output",
     default=None,
     metavar="PATH",
-    help="Output path for signed manifest JSON (default: <model-dir>/signed_manifest.json).",
+    help=(
+        "Output path for signed manifest JSON "
+        "(default: <model-dir>/signed_manifest.json)."
+    ),
 )
 def sign_command(
     model_dir: str,
@@ -113,9 +135,25 @@ def sign_command(
 
 
 @main.command("verify")
-@click.option("--manifest", "manifest_path", required=True, metavar="PATH", help="Path to signed manifest JSON.")
-@click.option("--key", required=True, metavar="PATH", help="Path to public PEM key file.")
-@click.option("--model-dir", default=None, metavar="DIR", help="If supplied, also verify on-disk file hashes.")
+@click.option(
+    "--manifest",
+    "manifest_path",
+    required=True,
+    metavar="PATH",
+    help="Path to signed manifest JSON.",
+)
+@click.option(
+    "--key",
+    required=True,
+    metavar="PATH",
+    help="Path to public PEM key file.",
+)
+@click.option(
+    "--model-dir",
+    default=None,
+    metavar="DIR",
+    help="If supplied, also verify on-disk file hashes.",
+)
 def verify_command(manifest_path: str, key: str, model_dir: str | None) -> None:
     """Verify the cryptographic signature of a signed manifest."""
     verifier = ModelVerifier()
@@ -133,7 +171,9 @@ def verify_command(manifest_path: str, key: str, model_dir: str | None) -> None:
         click.echo("Signature: VALID")
         click.echo(f"  Signer   : {result.signer_id}")
         if result.manifest:
-            click.echo(f"  Model    : {result.manifest.model_name} v{result.manifest.model_version}")
+            model_name = result.manifest.model_name
+            model_version = result.manifest.model_version
+            click.echo(f"  Model    : {model_name} v{model_version}")
     else:
         click.echo(f"Signature: INVALID — {result.error}")
         sys.exit(2)
@@ -155,7 +195,13 @@ def verify_command(manifest_path: str, key: str, model_dir: str | None) -> None:
 
 
 @main.command("inspect")
-@click.option("--manifest", "manifest_path", required=True, metavar="PATH", help="Path to signed manifest JSON.")
+@click.option(
+    "--manifest",
+    "manifest_path",
+    required=True,
+    metavar="PATH",
+    help="Path to signed manifest JSON.",
+)
 @click.option("--json-output", is_flag=True, help="Emit raw JSON.")
 def inspect_command(manifest_path: str, json_output: bool) -> None:
     """Display the contents of a signed manifest."""
@@ -181,9 +227,12 @@ def inspect_command(manifest_path: str, json_output: bool) -> None:
     click.echo(f"\nSigner       : {s.signer_id}")
     click.echo(f"Algorithm    : {s.algorithm.value}")
     click.echo(f"Signed At    : {s.signed_at.isoformat()}")
-    click.echo(f"\nFiles in manifest:")
+    click.echo("\nFiles in manifest:")
     for entry in m.files:
-        click.echo(f"  {entry.path}  ({entry.size_bytes:,} bytes)  sha256:{entry.sha256_hash[:16]}...")
+        sha_prefix = entry.sha256_hash[:16]
+        click.echo(
+            f"  {entry.path}  ({entry.size_bytes:,} bytes)  sha256:{sha_prefix}..."
+        )
 
 
 if __name__ == "__main__":

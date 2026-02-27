@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec, ed25519
+from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.ec import (
     ECDSA,
     EllipticCurvePrivateKey,
@@ -28,7 +28,6 @@ from aumai_modelseal.models import (
     SignedManifest,
     VerificationResult,
 )
-
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -57,19 +56,32 @@ class KeyManager:
     """Generate, persist, and load asymmetric key pairs."""
 
     def generate_keypair(
-        self, algorithm: SignatureAlgorithm
+        self,
+        algorithm: SignatureAlgorithm,
+        passphrase: bytes | None = None,
     ) -> tuple[bytes, bytes]:
         """Generate a fresh key pair.
+
+        Args:
+            algorithm: The signing algorithm to use (``ed25519`` or ``ecdsa_p256``).
+            passphrase: Optional passphrase to encrypt the private key PEM.
+                When provided, :func:`load_private_key` must be called with the
+                matching ``password`` argument to decrypt it.
 
         Returns:
             A tuple of ``(private_key_bytes, public_key_bytes)`` in PEM format.
         """
+        encryption: serialization.KeySerializationEncryption = (
+            serialization.BestAvailableEncryption(passphrase)
+            if passphrase is not None
+            else serialization.NoEncryption()
+        )
         if algorithm == SignatureAlgorithm.ed25519:
             private_key = Ed25519PrivateKey.generate()
             private_pem = private_key.private_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption(),
+                encryption_algorithm=encryption,
             )
             public_pem = private_key.public_key().public_bytes(
                 encoding=serialization.Encoding.PEM,
@@ -80,7 +92,7 @@ class KeyManager:
             private_pem = ec_private_key.private_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption(),
+                encryption_algorithm=encryption,
             )
             public_pem = ec_private_key.public_key().public_bytes(
                 encoding=serialization.Encoding.PEM,
@@ -111,9 +123,27 @@ class KeyManager:
         except NotImplementedError:
             pass  # Windows — skip chmod
 
-    def load_private_key(self, path: str) -> bytes:
-        """Read and return raw PEM bytes from *path*."""
-        return Path(path).read_bytes()
+    def load_private_key(self, path: str, password: bytes | None = None) -> bytes:
+        """Read and return raw PEM bytes from *path*.
+
+        Args:
+            path: Filesystem path to the PEM-encoded private key file.
+            password: Optional passphrase used to decrypt the private key.
+                Must match the passphrase supplied to :meth:`generate_keypair`.
+                Pass ``None`` (the default) for unencrypted keys.
+
+        Returns:
+            The raw PEM bytes.  These can be passed directly to
+            :meth:`ModelSigner.sign_manifest` — the password is *not* embedded
+            in the returned bytes.  The caller must supply the same password to
+            :func:`cryptography.hazmat.primitives.serialization.load_pem_private_key`
+            when deserialising.
+        """
+        pem_bytes = Path(path).read_bytes()
+        # Eagerly validate that the key can be loaded with the given password so
+        # that callers receive a clear error here rather than later at sign time.
+        serialization.load_pem_private_key(pem_bytes, password=password)
+        return pem_bytes
 
     def load_public_key(self, path: str) -> bytes:
         """Read and return raw PEM bytes from *path*."""
@@ -143,7 +173,9 @@ class ModelSigner:
         """
         root = Path(model_dir)
         if not root.is_dir():
-            raise ValueError(f"model_dir does not exist or is not a directory: {model_dir}")
+            raise ValueError(
+                f"model_dir does not exist or is not a directory: {model_dir}"
+            )
 
         entries: list[FileEntry] = []
         total_bytes: int = 0
@@ -154,7 +186,9 @@ class ModelSigner:
             relative = file_path.relative_to(root).as_posix()
             size = file_path.stat().st_size
             sha256 = _sha256_file(file_path)
-            entries.append(FileEntry(path=relative, size_bytes=size, sha256_hash=sha256))
+            entries.append(
+                FileEntry(path=relative, size_bytes=size, sha256_hash=sha256)
+            )
             total_bytes += size
 
         return ModelManifest(
@@ -173,8 +207,16 @@ class ModelSigner:
         manifest: ModelManifest,
         private_key_bytes: bytes,
         signer_id: str,
+        password: bytes | None = None,
     ) -> SignedManifest:
         """Sign *manifest* with *private_key_bytes* (PEM).
+
+        Args:
+            manifest: The :class:`ModelManifest` to sign.
+            private_key_bytes: PEM-encoded private key bytes.
+            signer_id: Identifier for the signing entity (stored in the signature).
+            password: Optional passphrase if *private_key_bytes* was encrypted
+                with :meth:`KeyManager.generate_keypair(passphrase=...)`.
 
         Returns:
             A :class:`SignedManifest` containing the original manifest and the
@@ -182,7 +224,9 @@ class ModelSigner:
         """
         payload = _canonical_manifest_bytes(manifest)
 
-        private_key = serialization.load_pem_private_key(private_key_bytes, password=None)
+        private_key = serialization.load_pem_private_key(
+            private_key_bytes, password=password
+        )
 
         if isinstance(private_key, Ed25519PrivateKey):
             algorithm = SignatureAlgorithm.ed25519

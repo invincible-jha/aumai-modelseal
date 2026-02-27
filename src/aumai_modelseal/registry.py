@@ -15,10 +15,17 @@ from aumai_modelseal.models import (
 
 
 class PublisherRegistry:
-    """Maintain a set of trusted publishers and verify manifests against them.
+    """Trusted publisher key registry with JSON file persistence.
 
-    The registry is stored as a JSON file on disk.  All mutating operations
-    persist the change immediately to ensure durability.
+    Maintain a set of trusted publishers and verify manifests against them.
+    All mutating operations persist the change immediately to ensure durability.
+
+    Security note: The registry file is stored as plain JSON without integrity
+    protection.  An attacker with write access to the registry file can substitute
+    public keys, allowing them to forge signatures that will pass verification.
+    For production deployments, protect the registry file with filesystem-level
+    access controls (e.g. read-only for the service account) and consider adding
+    HMAC-based integrity verification over the serialised registry contents.
     """
 
     def __init__(self, registry_path: str | None = None) -> None:
